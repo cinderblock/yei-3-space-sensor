@@ -1,100 +1,32 @@
-var serialport = require('serialport');
-var SerialPort = serialport.SerialPort;
+var SerialPort = require('serialport').SerialPort;
+var YEIParser = require('./YEIParser.js');
 
-var Parser = require('binary-parser').Parser;
+class YEI3Space {
+	constructor(portName, options) {
+		
+		options = options || {};
+		
+		options.baudRate = options.baudRate || 115200;
+		
+		// The incoming data parser we pass to SerialPort
+		this.parser = new YEIParser();
+		
+		// The serial port we're using
+		this.serialPort = new SerialPort(portName, {baudRate:options.baudRate, parser: this.parser.dataHandler, bufferSize: 500}, false);
+		
+		// Number of times we sent a command and expected a response but didn't get one
+		this.timeouts = 0;
+		
+		// Should errors be printed to console automatically
+		if (options.printErrors) {
+			this.serialPort.on('error', err => {
+				console.log('Serial Port Error: ');
+				console.log(err);
+			});
+		}
+		
+	}
 
-var serialPort;
-
-var timeouts = 0;
-
-function getFormatFullLength(format) {
-	var sum = 0;
-	for (var i in format) {
-		sum += getFormatTypeLength(format[i]) * (format[i].arrayLength || 1);
-	}
-	return sum;
-}
-
-function getFormatTypeLength(format) {
-	if (format.type == 'floatLE') {
-		return 4;
-	}
-	if (format.type == 'floatBE') {
-		return 4;
-	}
-	if (format.type == 'doubleLE') {
-		return 8;
-	}
-	if (format.type == 'doubleBE') {
-		return 8;
-	}
-	if (format.type == 'intLE') {
-		return format.length;
-	}
-	if (format.type == 'intBE') {
-		return format.length;
-	}
-	if (format.type == 'uintLE') {
-		return format.length;
-	}
-	if (format.type == 'uintBE') {
-		return format.length;
-	}
-	if (format.type == 'string') {
-		return format.length;
-	}
-	if (format.type == 'byte') {
-		return 1;
-	}
-	if (format.type == 'bool') {
-		return 1;
-	}
-}
-
-function readNextData(data, format, offset) {
-	if (format.type == 'floatLE') {
-		return data.readFloatLE(offset);
-	}
-	if (format.type == 'floatBE') {
-		return data.readFloatBE(offset);
-	}
-	if (format.type == 'doubleLE') {
-		return data.readDoubleLE(offset);
-	}
-	if (format.type == 'doubleBE') {
-		return data.readDoubleBE(offset);
-	}
-	if (format.type == 'intLE') {
-		return data.readIntLE(offset, format.length);
-	}
-	if (format.type == 'intBE') {
-		return data.readIntBE(offset, format.length);
-	}
-	if (format.type == 'uintLE') {
-		return data.readUIntLE(offset, format.length);
-	}
-	if (format.type == 'uintBE') {
-		return data.readUIntBE(offset, format.length);
-	}
-	if (format.type == 'string') {
-		return data.toString(format.encoding, offset, offset + format.length);
-	}
-	if (format.type == 'byte') {
-		return data.readUInt8(offset);
-	}
-	if (format.type == 'bool') {
-		return data.readUInt8(offset) !== 0;
-	}
-}
-
-function ParseBlock(data, format, offset) {
-	// Make sure offset starts as a number
-	offset = offset || 0;
-
-	if (offset) data = data.slice(offset);
-
-	return format.parse(data);
-}
 
 var headerFormat = {parser: new Parser(), length: 0};
 var responseFormat = false;
@@ -106,7 +38,7 @@ buff.fill(0);
 // How much of the buffer has real data in it
 var buffLen = 0;
 
-function getByteSum(buff, offset, end) {
+getByteSum(buff, offset, end) {
 	var ret = 0;
 	for (var i = (offset || 0); i < (end || buff.length); i++) {
 		ret += buff[i];
@@ -114,136 +46,7 @@ function getByteSum(buff, offset, end) {
 	return ret & 0xff;
 }
 
-function yeiParserDebug() {
-	return;
-	console.log('yei parser', ...arguments);
-}
 
-function YEIParser(emitter, data) {
-	var cpLen = data.copy(buff, buffLen);
-
-	if (cpLen < data.length) {
-		emitter.emit('error', 'Buffer overrun');
-	}
-
-	yeiParserDebug('New data');
-	yeiParserDebug(data);
-
-	if (!responseFormat && !streamingFormat) {
-		return;
-	}
-
-	buffLen += cpLen;
-
-	var headerLength;
-
-	while (buffLen >= (headerLength = headerFormat.length)) {
-		yeiParserDebug(' loop');
-
-		yeiParserDebug(responseFormat);
-		yeiParserDebug(streamingFormat);
-
-		var message = {};
-		message.header = ParseBlock(buff, headerFormat.parser);
-
-		var format, event, messageLength;
-
-		if (message.header.commandEcho !== undefined) {
-			yeiParserDebug('	commandEcho :' + message.header.commandEcho);
-			// If commandEcho is turned on, we know which format to use
-			event = message.header.commandEcho == 0xff ? 'stream' : 'response';
-			format = event == 'response' ? responseFormat : streamingFormat;
-			
-			//IF ERRORED HERE: check to see if command exists in getCommandResponseFormat function
-			if(format)
-				messageLength = format.length;
-			else
-				messageLength = 0;
-		}
-
-		yeiParserDebug(messageLength);
-
-		if (message.header.dataLength !== undefined) {
-			yeiParserDebug('	dataLength');
-			if (buffLen < headerLength + message.header.dataLength) {
-				// Not enough data in the buffer yet. Wait for more
-				break;
-			}
-			// If streaming data and we have no idea waht to do with it, discard it
-			if (event == 'stream' && !format) {
-				buff.copy(buff, 0, headerLength + message.header.dataLength);
-				buffLen -= headerLength + message.header.dataLength;
-				continue;
-			}
-			if ((messageLength !== undefined) && (messageLength != message.header.dataLength)) {
-				emitter.emit('warning', 'Incoming message length does not match expected format.');
-				yeiParserDebug('	Incoming message length does not match expected format.');
-			}
-			messageLength = message.header.dataLength;
-		} else if (event == 'stream' && !format) {
-			// Discard streaming data. Since we don't know how long it is, drop all the data.
-			buffLen = 0;
-			break;
-		}
-
-		if (!format) {
-			yeiParserDebug('	no Format yet');
-			// Since commandEcho was not turned on, we'll need to guess now
-			if (messageLength !== undefined) {
-				// If messageLength is known, try to match it to one of our expected formats
-				if (responseFormat && (messageLength == responseFormat.length)) {
-					event = 'response';
-				} else if (streamingFormat && (messageLength == streamingFormat.length)) {
-					event = 'stream';
-				} else {
-					emitter.emit('warning', 'Incoming message length does not match either expected format.');
-					event = responseFormat ? 'response' : 'stream';
-				}
-			} else {
-				// Neither dataLength nor commandEcho are set. We gotta guess
-				event = responseFormat ? 'response' : 'stream';
-			}
-
-			format = event == 'response' ? responseFormat : streamingFormat;
-		}
-
-		if (messageLength === undefined) {
-			yeiParserDebug('	guess length');
-			messageLength = format.length;
-		}
-
-		if (message.header.checksum !== undefined) {
-			yeiParserDebug('	checksum', message.header.checksum, getByteSum(buff, headerLength, headerLength + messageLength));
-			message.valid = message.header.checksum === getByteSum(buff, headerLength, headerLength + messageLength);
-		}
-
-		yeiParserDebug(' body start');
-
-		message.body = ParseBlock(buff, format.parser, headerLength);
-
-		yeiParserDebug(' body stop');
-
-		emitter.emit(event, message);
-
-		yeiParserDebug(' data emitted');
-
-		buff.copy(buff, 0, headerLength + messageLength);
-		buffLen -= headerLength + messageLength;
-	}
-
-	yeiParserDebug('done');
-}
-
-//TODO: If you ever make more than one of these, life will be bad.
-function YEI(portName) {
-
-	serialPort = new SerialPort(portName, {baudRate:115200, parser: YEIParser, bufferSize: 500}, false);
-
-	serialPort.on('error', function (err) {
-		console.log('Serial Port Error: ');
-		console.log(err);
-	});
-}
 
 /*
  * Returns the parser given the command and format
@@ -321,7 +124,7 @@ function getCommandResponseFormat(command, format) {
 /**
  * sendCommand(command, [sendBuffer,] [doneSendingCallback, [responseRecievedCallback]])
  */
-function sendCommand(command, data, doneSending, responseRecieved) {
+sendCommand(command, data, doneSending, responseRecieved) {
 	if (typeof data === 'undefined' || typeof data === 'function') {
 		responseRecieved = doneSending;
 		doneSending = data;
