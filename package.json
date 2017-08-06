@@ -1,0 +1,34 @@
+{
+  "name": "yei-3-space-sensor",
+  "version": "0.0.0",
+  "description": "Node.js library for interfacing with YEI/YOST Labs 3-Space Sensors",
+  "main": "YEI3Space.js",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cinderblock/yei-3-space-sensor.git"
+  },
+  "keywords": [
+    "yei",
+    "yost",
+    "yost",
+    "labs",
+    "3-space",
+    "sensor",
+    "imu",
+    "kalman",
+    "serial"
+  ],
+  "author": "Cameron Tacklind <cameron@tacklind.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/cinderblock/yei-3-space-sensor/issues"
+  },
+  "homepage": "https://github.com/cinderblock/yei-3-space-sensor#readme",
+  "devDependencies": {
+    "binary-parser": "^1.1.5",
+    "serialport": "^5.0.0"
+  }
+}
